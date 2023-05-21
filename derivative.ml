@@ -1,9 +1,11 @@
 open Str
 
-#load "str.cma";;
+#load "str.cma";; (* Interpreter directive to use str.cma library, with regular expressions *)
 
 let () = Printexc.record_backtrace true
 
+(* Expression creation and derivation logic *)
+ 
 type expr =
   Const of float
   |Var of string
@@ -66,6 +68,7 @@ let rec derivative v expr =
     |Neg(e) -> neg (derivative v e)
     |Div(e1,e2) -> div (sub (prod e2 (derivative v e1)) (prod e1 (derivative v e2))) (exp e2 (Const(2.0)))
 
+(* Helper functions *)
 
 let rec toString exp = match exp with 
   |Var(name) -> name
@@ -79,16 +82,34 @@ let rec toString exp = match exp with
   |Exp(e1,e2) -> (toString e1)^"**"^(toString e2)
   |Div(e1,e2) -> (toString e1)^" / "^(toString e2)
 
-exception EvalError of string
 
 let rec lookup (env : (string * float) list) (element: string): float option = 
   match env with
     |[] -> None
     |(x,y)::rest -> if x = element then Some y else lookup rest element 
 
+let collect_vars expression = 
+  let rec collect e acc = match e with 
+    |Var(name) -> name::acc
+    |Const(_) -> acc
+    |Sum(e1, e2) -> collect e1 (collect e2 acc) 
+    |Prod(e1, e2) -> collect e1 (collect e2 acc) 
+    |Sub(e1, e2) -> collect e1 (collect e2 acc)
+    |Div(e1, e2) -> collect e1 (collect e2 acc)
+    |Exp(e1, e2) -> collect e1 (collect e2 acc)
+    |Neg(e) -> collect e acc
+  in
+    collect expression []
+
 let is_member env element = match lookup env element with
   |None -> false
   |Some(_) -> true
+
+(* Evaliation logic *)
+
+
+exception EvalError of string
+
 
 let rec eval_with expression env = match expression with
   |Var(name) -> begin match lookup env name with 
@@ -101,6 +122,10 @@ let rec eval_with expression env = match expression with
   |Div (e1, e2) -> (eval_with e1 env) /. (eval_with e2 env)
   |Sub (e1, e2) -> (eval_with e1 env) -. (eval_with e2 env)
   |Neg(e) -> -.(eval_with e env)
+
+
+(* Parsing helper functions and algorithm *)
+
 
 let rest list = match list with 
   |_::rest -> rest
@@ -143,7 +168,7 @@ exception ParseError of string
 let is_num c = Str.string_match (Str.regexp "[0-9]+$") (String.make 1 c) 0
 
 let is_var chr = match chr with 
-  |'*' | '+' | '/' | '-' -> false
+  |'*' | '+' | '/' | '-' | '(' | ')' -> false
   |c when is_num c -> false 
   |_ -> true
 
@@ -215,6 +240,8 @@ let parse expr_string = getE (ref (explode expr_string))
 
 let df var inputStr = toString (derivative var (parse inputStr))
 
+(* User prompts and main function *)
+
 let prompt_user_df () = 
   print_endline "Enter the expression you want to derive or evaluate";
   let input = read_line () in
@@ -222,11 +249,30 @@ let prompt_user_df () =
     let var = read_line () in
       print_endline ("Derivative : "^(df var input))
 
+let build_env var_list = 
+  let rec aux vlist acc = match vlist with 
+    |[] -> acc
+    |x::xs -> begin 
+                print_endline ("Enter a value for variable "^x^":");
+                let value = read_float () in 
+                aux xs ((x,value)::acc)
+              end
+  in
+    aux var_list []
+    
+
+let prompt_user_eval () = 
+  print_endline "Enter the expression you want to evaluate";
+  let input = read_line () in
+  let expression = parse input in 
+  let env = build_env (collect_vars expression) in 
+    print_endline ("Result: "^(string_of_float (eval_with expression env)))
+
 let rec ask () = 
   print_endline "Enter d to derive, e to evaluate or x to quit the program :";
   match read_line () with
     |"d" -> prompt_user_df ()
-    |"v" -> raise (ParseError "To be implemented")
+    |"e" -> prompt_user_eval () 
     |"x" -> print_endline "Goodbye!"
     |_ -> print_endline "Sorry, I did not understand."; ask ()
 
