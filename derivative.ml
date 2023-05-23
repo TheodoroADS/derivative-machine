@@ -22,11 +22,22 @@ let neg e = match e with
   |Sub(e1,e2) -> Sub(e2,e1)
   |_ -> Neg(e)
 
+let exp e1 e2 = match (e1,e2) with 
+  |(Const(0.0), x) -> Const(0.0)
+  |(_, Const(0.0)) -> Const(1.0)
+  |(x, Const(1.0)) -> x
+  |(Const(1.0), x) -> Const(1.0)
+  |(Const(x), Const(y)) -> Const(x ** y)
+  |_ -> Exp(e1,e2)
+
 let prod e1 e2 = match (e1,e2) with 
   |(Const(0.0), _) -> Const(0.0)
   |(_, Const(0.0)) -> Const(0.0)
   |(Const(1.0) , x) | (x, Const(1.0))  -> x
   |(Const(c1), Const(c2)) -> Const(c1 *. c2)
+  |(Var(x), Var(y)) when x = y -> exp (Var(x)) (Const(2.0))
+  |(Exp(Var(x), Const(n)), Var(y)) when x = y -> exp (Var(x)) (Const(n +. 1.0))
+  |(Var(x), Exp(Var(y),Const(n))) when x = y -> exp (Var(x)) (Const(n +. 1.0))
   |_ -> Prod(e1,e2)
 
 let sum e1 e2 = match (e1,e2) with 
@@ -41,14 +52,6 @@ let sub e1 e2 = match (e1,e2) with
   |(Const(x), Const(y)) -> Const(x -. y)
   |_ -> Sub(e1,e2)
 
-
-let exp e1 e2 = match (e1,e2) with 
-  |(Const(0.0), x) -> Const(0.0)
-  |(_, Const(0.0)) -> Const(1.0)
-  |(x, Const(1.0)) -> x
-  |(Const(1.0), x) -> Const(1.0)
-  |(Const(x), Const(y)) -> Const(x ** y)
-  |_ -> Exp(e1,e2)
 
 let div e1 e2 = match (e1,e2) with
   |(_, Const(0.0)) -> raise Division_by_zero
@@ -70,16 +73,24 @@ let rec derivative v expr =
 
 (* Helper functions *)
 
+let between_parens str = "("^str^")"
+
 let rec toString exp = match exp with 
   |Var(name) -> name
   |Const(num) -> Printf.sprintf "%.2f" num
   |Sum(e1,e2) -> (toString e1) ^ " + " ^ (toString e2)
-  |Prod(Const(cst), e) -> (toString (Const(cst)))^(toString e)
-  |Prod(e, Const(cst)) -> (toString (Const(cst)))^(toString e)
-  |Prod(e1,e2) -> (toString e1) ^ " * " ^ (toString e2)
+  |Prod(Const(cst), Var(name)) | Prod(Var(name), Const(cst)) -> (toString (Const(cst)))^(toString (Var(name)))
+  |Prod(Var(name1), Var(name2)) -> (toString (Var(name1))^(toString (Var(name2))))
+  |Prod(e1, Const(n)) -> (between_parens (toString e1)) ^" * "^(toString (Const(n))) 
+  |Prod(Const(n), e1) -> (toString e1) ^" * "^(between_parens (toString (Const(n))))
+  |Prod(e1,e2) -> (between_parens (toString e1)) ^ " * " ^ (between_parens (toString e2))
   |Sub(e1,e2) -> (toString e1) ^ " - " ^ (toString e2)
   |Neg(e) -> "-"^(toString e)
-  |Exp(e1,e2) -> (toString e1)^"**"^(toString e2)
+  |Exp(Const(n), Var(name)) -> (toString (Const(n)))^"**"^(toString (Var(name)))
+  |Exp(Var(name), Const(n)) -> (toString (Var(name)))^"**"^(toString (Const(n)))
+  |Exp(e1, (Const(_) as e2)) | Exp(e1, (Var(_) as e2)) -> (between_parens (toString e1))^"**"^(toString e2)
+  |Exp((Const(_) as e1), e2) | Exp((Var(_) as e1, e2)) -> (toString e1)^"**"^(between_parens (toString e2))
+  |Exp(e1,e2) -> (between_parens (toString e1))^"**"^(between_parens (toString e2))
   |Div(e1,e2) -> (toString e1)^" / "^(toString e2)
 
 
@@ -88,9 +99,14 @@ let rec lookup (env : (string * float) list) (element: string): float option =
     |[] -> None
     |(x,y)::rest -> if x = element then Some y else lookup rest element 
 
+let rec is_member lst element = match lst with 
+  |[] -> false
+  |x::rest -> if x = element then true else is_member rest element 
+
+
 let collect_vars expression = 
   let rec collect e acc = match e with 
-    |Var(name) -> name::acc
+    |Var(name) -> if is_member acc name then acc else name::acc
     |Const(_) -> acc
     |Sum(e1, e2) -> collect e1 (collect e2 acc) 
     |Prod(e1, e2) -> collect e1 (collect e2 acc) 
@@ -100,10 +116,6 @@ let collect_vars expression =
     |Neg(e) -> collect e acc
   in
     collect expression []
-
-let is_member env element = match lookup env element with
-  |None -> false
-  |Some(_) -> true
 
 (* Evaliation logic *)
 
@@ -158,7 +170,8 @@ let implode l =
 
 let consumeVar chars_ref = 
     let rec consume input acc = match !input with 
-      |[] |' '::_ | '*'::_ | '+'::_ | '-'::_ | '/'::_ |'\x00'::_ -> Var(implode (List.rev acc))
+      |[] |' '::_ | '*'::_ | '+'::_ | '-'::_ | '/'::_ |'\x00'::_
+      |'('::_ | ')'::_   -> Var(implode (List.rev acc))
       |c::_ -> begin advance input; consume input (c::acc) end
     in 
       consume chars_ref []
@@ -226,7 +239,7 @@ and getF input = match peek_no_blank input with
             let e = getE input in
             let tok = peek input in 
             if tok = ')' 
-              then begin 
+              then begin
                   advance input;
                   e
               end
