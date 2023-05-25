@@ -88,10 +88,16 @@ let rec toString exp = match exp with
   |Neg(e) -> "-"^(toString e)
   |Exp(Const(n), Var(name)) -> (toString (Const(n)))^"**"^(toString (Var(name)))
   |Exp(Var(name), Const(n)) -> (toString (Var(name)))^"**"^(toString (Const(n)))
+  |Exp(Var(name), Var(name2)) -> (toString (Var(name)))^"**"^(toString (Var(name2)))
+  |Exp(Const(m), Const(n)) -> (toString (Const(m)))^"**"^(toString (Const(n)))
   |Exp(e1, (Const(_) as e2)) | Exp(e1, (Var(_) as e2)) -> (between_parens (toString e1))^"**"^(toString e2)
-  |Exp((Const(_) as e1), e2) | Exp((Var(_) as e1, e2)) -> (toString e1)^"**"^(between_parens (toString e2))
+  |Exp((Var(_) as e1), e2) | Exp((Const(_) as e1) , e2) -> (toString e1)^"**"^(between_parens (toString e2))
   |Exp(e1,e2) -> (between_parens (toString e1))^"**"^(between_parens (toString e2))
-  |Div(e1,e2) -> (toString e1)^" / "^(toString e2)
+  |Div((Const(_) as e1), (Const(_) as e2)) | Div((Var(_) as e1), (Var(_) as e2)) 
+  |Div((Const(_) as e1), (Var(_) as e2)) |Div((Var(_) as e1), (Const(_) as e2)) -> (toString e1)^" / "^(toString e2)
+  |Div(e1, (Const(_) as e2)) | Div(e1, (Var(_) as e2)) -> (between_parens (toString e1))^" / "^(toString e2)
+  |Div((Const(_) as e1), e2) | Div((Var(_) as e1) , e2) -> (toString e1)^" / "^(between_parens (toString e2))
+  |Div(e1,e2) -> (between_parens (toString e1))^" / "^(between_parens (toString e2))
 
 
 let rec lookup (env : (string * float) list) (element: string): float option = 
@@ -262,13 +268,17 @@ let prompt_user_df () =
     let var = read_line () in
       print_endline ("Derivative : "^(df var input))
 
+let rec try_read_float () = try read_float () with 
+  |_ -> print_endline "Could not parse input into a float. Please input a valid float literal";
+        try_read_float ()
+
 let build_env var_list = 
   let rec aux vlist acc = match vlist with 
     |[] -> acc
     |x::xs -> begin 
                 print_endline ("Enter a value for variable "^x^":");
-                let value = read_float () in 
-                aux xs ((x,value)::acc)
+                let value = try_read_float () in 
+                  aux xs ((x,value)::acc)
               end
   in
     aux var_list []
